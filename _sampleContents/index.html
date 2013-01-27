@@ -1,0 +1,25 @@
+<?php
+
+$oauth = $this->px->get_plugin_object('pxOAuthConsumer');
+
+print '<p>Status: '.t::h($oauth->get_user_status('twitter')).'</p>'."\n";
+
+if( $px->req()->get_param('mode')=='logout' ){
+	if( $oauth->logout_all() ){
+		print '<p>ログアウトしました。</p>';
+	}else{
+		print '<p class="error">ログアウトに失敗しました。</p>';
+	}
+	print '<p><a href="?">戻る</a></p>'."\n";
+}elseif( $oauth->is_login('twitter') ){
+	if( $oauth->get_user_status('twitter') == 'callback' ){
+		$oauth->receive_callback('twitter');
+	}
+	$user_info = $oauth->get_user_info('twitter');
+	print '<p>UserName:'.t::h($user_info['screen_name']).'</p>'."\n";
+	print '<p><a href="?mode=logout">ログアウト</a></p>'."\n";
+}else{
+	print '<p><a href="'.t::h($oauth->get_auth_url('twitter')).'">Twitterでログインする</a></p>'."\n";
+}
+	
+?>
