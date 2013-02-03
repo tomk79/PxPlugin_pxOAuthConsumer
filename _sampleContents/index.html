@@ -1,25 +1,49 @@
 <?php
 
-$oauth = $this->px->get_plugin_object('pxOAuthConsumer');
+$pxoauth = $this->px->get_plugin_object('pxOAuthConsumer');
 
-print '<p>Status: '.t::h($oauth->get_user_status('twitter')).'</p>'."\n";
+print '<h2>Twitter</h2>'."\n";
+print '<p>Status: '.t::h($pxoauth->get_user_status('twitter')).'</p>'."\n";
 
 if( $px->req()->get_param('mode')=='logout' ){
-	if( $oauth->logout_all() ){
+	if( $pxoauth->logout_all() ){
 		print '<p>ログアウトしました。</p>';
 	}else{
 		print '<p class="error">ログアウトに失敗しました。</p>';
 	}
 	print '<p><a href="?">戻る</a></p>'."\n";
-}elseif( $oauth->is_login('twitter') ){
-	if( $oauth->get_user_status('twitter') == 'callback' ){
-		$oauth->receive_callback('twitter');
+}elseif( $pxoauth->is_login('twitter') ){
+	if( $pxoauth->get_user_status('twitter') == 'callback' ){
+		$pxoauth->receive_callback('twitter');
 	}
-	$user_info = $oauth->get_user_info('twitter');
+	$user_info = $pxoauth->get_user_info('twitter');
 	print '<p>UserName:'.t::h($user_info['screen_name']).'</p>'."\n";
 	print '<p><a href="?mode=logout">ログアウト</a></p>'."\n";
+
+
+	if( $pxoauth->login_px_user('twitter') ){
+		print '<p>'.t::h($px->user()->get_login_user_account()).' としてログインしました。</p>'."\n";
+	}elseif( $px->user()->is_login() ){
+		//  既存のPXユーザーと紐付けを行う。
+		if( $pxoauth->relay_to_px_user('twitter') ){
+			print '<p>'.t::h($px->user()->get_login_user_account()).' と接続しました。</p>'."\n";
+		}else{
+			print '<p class="error">'.t::h($px->user()->get_login_user_account()).' との接続に失敗しました。</p>'."\n";
+		}
+
+	}else{
+		//  自動的にPXユーザーを作成する。
+/*
+		if( $pxoauth->auto_create_px_user('twitter') ){
+			print '<p>新規ユーザー '.t::h($px->user()->get_login_user_account()).' を作成し、接続しました。</p>'."\n";
+		}else{
+			print '<p class="error">新規ユーザーの作成に失敗しました。</p>'."\n";
+		}
+*/
+	}
+
 }else{
-	print '<p><a href="'.t::h($oauth->get_auth_url('twitter')).'">Twitterでログインする</a></p>'."\n";
+	print '<p><a href="'.t::h($pxoauth->get_auth_url('twitter')).'">Twitterでログインする</a></p>'."\n";
 }
-	
+
 ?>

@@ -184,8 +184,265 @@ class pxplugin_pxOAuthConsumer_register_object{
 	public function logout_all(){
 		$this->session = null;
 		$this->save_session();
+		$this->px->user()->logout();
 		return true;
 	}
+
+
+
+	/**
+	 * ログインしているPXユーザーと紐付ける
+	 */
+	public function relay_to_px_user( $provider_name ){
+		if( !$this->px->user()->is_login() ){
+			//  ログインしてない人はできません。
+			return false;
+		}
+
+		if( !$this->is_login($provider_name) ){
+			//  ログインしてない人はできません。
+			return false;
+		}
+
+		//  予め紐付けデータがあるか調べる。
+		$relay_data = $this->get_px_user_relay_info( $provider_name );
+		if(is_array($relay_data)){
+			//  すでに紐付けされている場合
+			if( $relay_data['user_id'] != $this->px->user()->get_login_user_id() ){
+				//  違うユーザーに紐付けられている。
+				return false;
+			}
+			//  ログイン日時を更新
+			if(!$this->update_login_date($provider_name)){
+				return false;
+			}
+			return true;
+		}else{
+			//  はじめて紐付ける場合
+			$result = $this->insert_relay_info( $provider_name );
+			return $result;
+		}
+
+		return false;
+	}//relay_to_px_user()
+
+	/**
+	 * ログインしているOAuthユーザーと紐づいたPXユーザーとしてログインする
+	 */
+	public function login_px_user( $provider_name ){
+		if( !$this->is_login($provider_name) ){
+			//  ログインしてない人はできません。
+			return false;
+		}
+
+		//  予め紐付けデータがあるか調べる。
+		$relay_data = $this->get_px_user_relay_info( $provider_name );
+
+		if( $this->px->user()->is_login() ){
+			//  すでにログインしていた人は、
+			//  リレーテーブルの内容と照合し、正しいか調べる。
+			if( $this->px->user()->get_login_user_id() != $relay_data['user_id'] ){
+				return false;
+			}
+			$this->update_login_date($provider_name);
+			return true;
+		}
+
+		$oauth_user_info = $this->get_user_info( $provider_name );
+
+		//  ログイン情報をセッションに入れる
+		$this->px->req()->set_session('USER_ID',$relay_data['user_id']);
+		$this->px->req()->set_session('USER_EXPIRE',time()+1800);
+		$this->px->user()->update_login_status(null,null);
+
+		if( !$this->px->user()->is_login() ){
+			return false;
+		}
+		$this->update_login_date($provider_name);
+		return true;
+	}//login_px_user()
+
+	/**
+	 * ログインしているOAuthユーザーの情報から、PXユーザー情報を自動的に登録する
+	 */
+	public function auto_create_px_user( $provider_name ){
+		if( !$this->is_login($provider_name) ){
+			//  ログインしてない人はできません。
+			return false;
+		}
+
+		$oauth_user_info = $this->get_user_info( $provider_name );
+
+		$class_name_dao_user = $this->px->load_px_class( '/daos/user.php' );
+		if( !$class_name_dao_user ){
+			return false;
+		}
+		$dao_user = new $class_name_dao_user( $this->px );
+
+		$user_info = array(
+			'user_account'=>$oauth_user_info['screen_name'],
+			'user_pw'=>$this->px->user()->crypt_user_password( uniqid() ),
+			'user_name'=>$oauth_user_info['name'],
+			'user_email'=>null,
+			'auth_level'=>1,
+		);
+		if( !$dao_user->create_user($user_info) ){
+			return false;
+		}
+
+		//  作成したログイン情報をセッションに入れ、ログインする。
+		$user_id = $dao_user->get_last_insert_user_id();
+		$this->px->req()->set_session('USER_ID',$user_id);
+		$this->px->req()->set_session('USER_EXPIRE',time()+1800);
+		$this->px->user()->update_login_status(null,null);
+
+		if( !$this->px->user()->is_login() ){
+			return false;
+		}
+
+		//  ログインしたユーザーと紐付ける
+		if( !$this->relay_to_px_user($provider_name) ){
+			return false;
+		}
+		return true;
+	}//auto_create_px_user()
+
+
+
+
+
+	/**
+	 * OAuthログイン情報から、PXユーザー情報を取得する
+	 */
+	private function get_px_user_relay_info($provider_name){
+		$oauth_user_info = $this->get_user_info( $provider_name );
+
+		//  予め紐付けデータがあるか調べる。
+		ob_start(); ?>
+SELECT * FROM :D:table_name
+WHERE
+    oauth_user_id = :S:oauth_user_id
+    AND oauth_provider_name = :S:oauth_provider_name
+    AND delete_flg = 0
+;
+<?php
+		$sql = ob_get_clean();
+
+		$bind_data = array(
+			'table_name'=>$this->px->get_conf('dbms.prefix').'_px_oauth_consumer_user_relay',
+			'oauth_user_id'=>$oauth_user_info['id'],
+			'oauth_provider_name'=>$provider_name,
+		);
+
+		$sql = $this->px->dbh()->bind( $sql , $bind_data );
+		$res = $this->px->dbh()->send_query( $sql );
+		$value = $this->px->dbh()->get_results();
+		$rtn = $value[0];
+		return $rtn;
+	}//get_px_user_relay_info()
+
+
+	/**
+	 * リレー情報を追加する。
+	 */
+	private function insert_relay_info($provider_name){
+		if( !$this->px->user()->is_login() ){
+			//  ログインしてない人はできません。
+			return false;
+		}
+		if( !$this->is_login($provider_name) ){
+			//  ログインしてない人はできません。
+			return false;
+		}
+
+		$oauth_user_info = $this->get_user_info( $provider_name );
+
+		ob_start(); ?>
+INSERT INTO :D:table_name(
+    user_id,
+    oauth_user_id,
+    oauth_provider_name,
+    login_date,
+    create_date,
+    delete_flg
+) VALUES (
+    :S:user_id,
+    :S:oauth_user_id,
+    :S:oauth_provider_name,
+    :S:now,
+    :S:now,
+    :N:delete_flg
+);
+<?php
+		$sql = ob_get_clean();
+
+		$bind_data = array(
+			'table_name'=>$this->px->get_conf('dbms.prefix').'_px_oauth_consumer_user_relay',
+		    'user_id'=>$this->px->user()->get_login_user_id(),
+		    'oauth_user_id'=>$oauth_user_info['id'],
+		    'oauth_provider_name'=>$provider_name,
+		    'now'=>$this->px->dbh()->int2datetime( time() ),
+		    'delete_flg'=>0
+		);
+
+		$sql = $this->px->dbh()->bind( $sql , $bind_data );
+		$res = $this->px->dbh()->send_query( $sql );
+		if( !$res ){
+			return false;
+		}
+		$value = $this->px->dbh()->get_results();
+		$this->px->dbh()->commit();
+		return true;
+	}//insert_relay_info()
+
+
+	/**
+	 * リレー情報上のログイン日時を更新する。
+	 */
+	private function update_login_date($provider_name){
+		if( !$this->px->user()->is_login() ){
+			//  ログインしてない人はできません。
+			return false;
+		}
+		if( !$this->is_login($provider_name) ){
+			//  ログインしてない人はできません。
+			return false;
+		}
+
+		$oauth_user_info = $this->get_user_info( $provider_name );
+
+		ob_start(); ?>
+UPDATE :D:table_name 
+SET
+    login_date = :S:now 
+WHERE
+    user_id = :S:user_id
+    AND oauth_user_id = :S:oauth_user_id
+    AND oauth_provider_name = :S:oauth_provider_name
+    AND delete_flg = 0
+;
+<?php
+		$sql = ob_get_clean();
+
+		$bind_data = array(
+			'table_name'=>$this->px->get_conf('dbms.prefix').'_px_oauth_consumer_user_relay',
+		    'user_id'=>$this->px->user()->get_login_user_id(),
+		    'oauth_user_id'=>$oauth_user_info['id'],
+		    'oauth_provider_name'=>$provider_name,
+		    'now'=>$this->px->dbh()->int2datetime( time() ),
+		    'delete_flg'=>0
+		);
+
+		$sql = $this->px->dbh()->bind( $sql , $bind_data );
+		$res = $this->px->dbh()->send_query( $sql );
+		if( !$res ){
+			return false;
+		}
+		$value = $this->px->dbh()->get_results();
+		$this->px->dbh()->commit();
+		return true;
+	}//update_login_date()
+
 
 }
 
