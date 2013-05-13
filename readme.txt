@@ -44,3 +44,11 @@ twitteroauth (https://github.com/abraham/twitteroauth)
 を使用しています。(同梱)
 
 
+
+
+
+------
+(C)Tomoya Koyanagi.
+http://www.pxt.jp/
+
+

@@ -1,0 +1,8 @@
+/**
+ * PxPlugin "pxOAuthConsumer" 更新履歴
+ */
+
+■PxPlugin pxOAuthConsumer 0.0.0a1 (****/**/**)
+
+- 初版リリース。
+
